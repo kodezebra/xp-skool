@@ -1,3 +1,7 @@
+import { useEffect, useState } from "react";
+import { queries } from "@/lib/db";
+import { Users, GraduationCap, Building2, DollarSign, TrendingUp } from "lucide-react";
+
 export function meta() {
   return [
     { title: "Dashboard" },
@@ -5,22 +9,73 @@ export function meta() {
   ];
 }
 
-const stats = [
-  { label: "Total Users", value: "2,847", change: "+12%" },
-  { label: "Active Sessions", value: "142", change: "+8%" },
-  { label: "Messages Sent", value: "48.2K", change: "+24%" },
-  { label: "Success Rate", value: "99.2%", change: "+0.3%" },
-];
+interface DashboardStats {
+  students: number;
+  users: number;
+  classes: number;
+  recentPayments: Array<{
+    id: string;
+    student_id: string;
+    student_name: string | null;
+    amount: number;
+    payment_date: string;
+    category: string;
+  }>;
+  monthlyRevenue: number;
+}
 
-const recentActivity = [
-  { id: 1, action: "New user registered", user: "Sarah Chen", time: "2m ago" },
-  { id: 2, action: "Campaign completed", user: "Marketing Team", time: "15m ago" },
-  { id: 3, action: "System backup completed", user: "System", time: "1h ago" },
-  { id: 4, action: "New message received", user: "John Doe", time: "2h ago" },
-  { id: 5, action: "Settings updated", user: "Admin", time: "3h ago" },
-];
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "UGX",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
 
 export default function Dashboard() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const data = await queries.dashboard.getStats();
+        setStats(data);
+      } catch (error) {
+        console.error("Failed to load dashboard stats:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadStats();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-xl font-semibold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const statCards = [
+    { label: "Active Students", value: stats?.students ?? 0, icon: GraduationCap },
+    { label: "Staff Members", value: stats?.users ?? 0, icon: Users },
+    { label: "Classes", value: stats?.classes ?? 0, icon: Building2 },
+    { label: "This Month", value: formatCurrency(stats?.monthlyRevenue ?? 0), icon: DollarSign },
+  ];
+
   return (
     <div className="space-y-4">
       <div>
@@ -31,38 +86,56 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
+        {statCards.map((stat) => (
           <div
             key={stat.label}
             className="border rounded-lg p-3 lg:p-4"
           >
-            <p className="text-xs lg:text-sm text-muted-foreground truncate">
-              {stat.label}
-            </p>
-            <p className="text-xl lg:text-2xl font-semibold mt-1">{stat.value}</p>
-            <p className="text-xs text-green-600 mt-0.5">{stat.change}</p>
+            <div className="flex items-center gap-2">
+              <stat.icon className="size-4 text-muted-foreground" />
+              <p className="text-xs lg:text-sm text-muted-foreground truncate">
+                {stat.label}
+              </p>
+            </div>
+            <p className="text-xl lg:text-2xl font-semibold mt-2">{stat.value}</p>
           </div>
         ))}
       </div>
 
       <div className="border rounded-lg">
-        <div className="px-4 py-3 border-b">
-          <h2 className="text-sm font-semibold">Recent Activity</h2>
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Recent Payments</h2>
+          <TrendingUp className="size-4 text-muted-foreground" />
         </div>
-        <div className="divide-y divide-border text-sm">
-          {recentActivity.map((item) => (
-            <div
-              key={item.id}
-              className="px-4 py-2.5 flex items-center justify-between"
-            >
-              <div className="min-w-0">
-                <p className="font-medium truncate">{item.action}</p>
-                <p className="text-xs text-muted-foreground truncate">{item.user}</p>
+        {stats?.recentPayments && stats.recentPayments.length > 0 ? (
+          <div className="divide-y divide-border text-sm">
+            {stats.recentPayments.map((payment) => (
+              <div
+                key={payment.id}
+                className="px-4 py-2.5 flex items-center justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium truncate">
+                    {payment.student_name || "Unknown Student"}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {payment.category}
+                  </p>
+                </div>
+                <div className="text-right shrink-0 ml-2">
+                  <p className="font-medium">{formatCurrency(payment.amount)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(payment.payment_date)}
+                  </p>
+                </div>
               </div>
-              <span className="text-xs text-muted-foreground shrink-0 ml-2">{item.time}</span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+            No recent payments recorded
+          </div>
+        )}
       </div>
     </div>
   );

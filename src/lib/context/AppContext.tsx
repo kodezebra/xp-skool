@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { queries } from "@/lib/db";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 type Theme = "light" | "dark" | "system";
 
@@ -76,10 +77,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAppName(name);
     try {
       await queries.settings.upsert("app_name", name);
+      await getCurrentWindow().setTitle(name);
     } catch (error) {
       console.error("Failed to save app name:", error);
     }
   };
+
+  useEffect(() => {
+    async function updateWindowTitle() {
+      if (appName && isReady) {
+        try {
+          await getCurrentWindow().setTitle(appName);
+        } catch (error) {
+          console.error("Failed to update window title:", error);
+        }
+      }
+    }
+    updateWindowTitle();
+  }, [appName, isReady]);
 
   return (
     <AppContext.Provider value={{ theme, setTheme, resolvedTheme, appName, setAppName: handleSetAppName, isReady }}>

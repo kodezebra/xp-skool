@@ -255,8 +255,9 @@ export default function UserDetail() {
             </div>
             <p className="text-xs text-muted-foreground mt-2">
               {user.role === "admin" && "Full access to all features"}
-              {user.role === "editor" && "Can create and edit content"}
-              {user.role === "viewer" && "Read-only access"}
+              {user.role === "teacher" && "Can manage classes and academic records"}
+              {user.role === "finance" && "Can manage payments and financial records"}
+              {user.role === "frontdesk" && "Can manage student registration"}
             </p>
           </div>
         </div>

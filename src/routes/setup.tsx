@@ -1,9 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { queries } from "@/lib/db";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { School, User, CheckCircle, ArrowRight, ArrowLeft } from "lucide-react";
 
@@ -11,6 +19,7 @@ type Step = "school" | "admin" | "complete";
 
 interface SchoolInfo {
   name: string;
+  type: "primary" | "secondary" | "college" | "other";
 }
 
 interface AdminInfo {
@@ -23,7 +32,7 @@ interface AdminInfo {
 export default function SetupWizard() {
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>("school");
-  const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({ name: "" });
+  const [schoolInfo, setSchoolInfo] = useState<SchoolInfo>({ name: "", type: "primary" });
   const [adminInfo, setAdminInfo] = useState<AdminInfo>({
     name: "",
     email: "",
@@ -80,6 +89,19 @@ export default function SetupWizard() {
     setIsSubmitting(true);
     try {
       await queries.settings.upsert("app_name", schoolInfo.name.trim());
+      await queries.settings.upsert("school_type", schoolInfo.type);
+      
+      // Pre-populate classes based on school type
+      if (schoolInfo.type === "primary") {
+        for (let i = 1; i <= 7; i++) {
+          await queries.classes.create({ name: `P${i}`, level: `P${i}` });
+        }
+      } else if (schoolInfo.type === "secondary") {
+        for (let i = 1; i <= 6; i++) {
+          await queries.classes.create({ name: `S${i}`, level: `S${i}` });
+        }
+      }
+      
       await queries.settings.upsert("setup_completed", "true");
 
       await queries.auth.register({
@@ -100,6 +122,8 @@ export default function SetupWizard() {
       const store = await Store.load("auth.store");
       await store.set("session", { userId: loginResult.user.id, token });
       await store.save();
+
+      await getCurrentWindow().setTitle(schoolInfo.name.trim());
 
       navigate("/", { replace: true });
     } catch (error) {
@@ -167,11 +191,30 @@ export default function SetupWizard() {
                   id="schoolName"
                   placeholder="Enter your school name"
                   value={schoolInfo.name}
-                  onChange={(e) => setSchoolInfo({ name: e.target.value })}
+                  onChange={(e) => setSchoolInfo({ ...schoolInfo, name: e.target.value })}
                   autoFocus
                 />
                 {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="schoolType">School Type</Label>
+                <Select value={schoolInfo.type} onValueChange={(v) => setSchoolInfo({ ...schoolInfo, type: v as any })}>
+                  <SelectTrigger id="schoolType">
+                    <SelectValue placeholder="Select school type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="primary">Primary School (P1 - P7)</SelectItem>
+                    <SelectItem value="secondary">Secondary School (S1 - S6)</SelectItem>
+                    <SelectItem value="college">College / Vocational</SelectItem>
+                    <SelectItem value="other">Other (Manual setup)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  This will pre-configure your default class levels.
+                </p>
+              </div>
+
               <Button className="w-full" onClick={handleSchoolNext}>
                 Next
                 <ArrowRight className="ml-2 w-4 h-4" />

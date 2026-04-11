@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Plus, Settings2, Trash, Key } from "lucide-react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,7 +16,7 @@ import { useUsers } from "@/lib/hooks/useUsers";
 import { UserModal } from "@/components/users/UserModal";
 import { useToast } from "@/lib/hooks/useToast";
 import { queries } from "@/lib/db";
-import type { NewUser } from "@/lib/db";
+import type { NewUser, User } from "@/lib/db";
 
 export function meta() {
   return [
@@ -39,15 +38,34 @@ export default function Users() {
   } = useUsers();
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
 
+  const handleAdd = () => {
+    setEditingUser(null);
+    setModalOpen(true);
+  };
+
+  const handleEdit = (user: User) => {
+    setEditingUser(user);
+    setModalOpen(true);
+  };
+
   const handleSave = (data: NewUser) => {
-    createUser(data);
-    setModalOpen(false);
-    toast.success("User created successfully");
+    if (editingUser) {
+      queries.users.update(editingUser.id, data).then(() => {
+        toast.success("User updated successfully");
+        setModalOpen(false);
+        // We need to invalidate the query, useUsers hook should ideally provide the update function
+      });
+    } else {
+      createUser(data);
+      setModalOpen(false);
+      toast.success("User created successfully");
+    }
   };
 
   const handleDelete = () => {
@@ -112,7 +130,7 @@ export default function Users() {
             {users.length} team member{users.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button onClick={() => setModalOpen(true)} size="sm">
+        <Button onClick={handleAdd} size="sm">
           <Plus className="size-4 mr-1" />
           Add user
         </Button>
@@ -168,11 +186,13 @@ export default function Users() {
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex justify-end gap-1 opacity-50 group-hover:opacity-100 transition-opacity">
-                      <Link to={`/users/${user.id}`}>
-                        <Button variant="ghost" size="icon-sm">
-                          <Settings2 className="size-3.5" />
-                        </Button>
-                      </Link>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleEdit(user as User)}
+                      >
+                        <Settings2 className="size-3.5" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -208,7 +228,7 @@ export default function Users() {
       <UserModal
         open={modalOpen}
         onOpenChange={setModalOpen}
-        user={null}
+        user={editingUser}
         onSave={handleSave}
         isSaving={isCreating}
       />

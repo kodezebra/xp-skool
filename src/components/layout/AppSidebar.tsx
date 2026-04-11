@@ -17,20 +17,21 @@ import {
 import { Avatar } from "@/components/users/Avatar";
 import { useApp } from "@/lib/context/AppContext";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { useRoleGuard } from "@/lib/hooks/useRoleGuard";
 import { useVersion } from "@/lib/hooks/useVersion";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: LayoutDashboard, adminOnly: true },
-  { path: "/users", label: "Users", icon: Users, adminOnly: true },
-  { path: "/settings", label: "Settings", icon: Settings },
+  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { path: "/students", label: "Students", icon: User, roles: ["admin", "frontdesk"] },
+  { path: "/academic", label: "Academic", icon: MessageSquare, roles: ["admin", "teacher"] },
+  { path: "/finance", label: "Finance", icon: Settings, roles: ["admin", "finance"], capability: "view_financials" },
+  { path: "/users", label: "Users", icon: Users, roles: ["admin"] },
+  { path: "/settings", label: "Settings", icon: Settings2, roles: ["admin"] },
 ];
 
 export function AppSidebar() {
   const { appName } = useApp();
   const { user, logout } = useAuth();
   const location = useLocation();
-  const { hasAccess: isAdmin } = useRoleGuard("admin");
   const version = useVersion();
   const { setOpenMobile, isMobile } = useSidebar();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -84,7 +85,19 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems
                 .filter((item) => {
-                  if (item.adminOnly && !isAdmin) return false;
+                  if (!user) return false;
+                  if (item.roles && !item.roles.includes(user.role)) {
+                    // Check if they have the capability as an exception
+                    if (item.capability) {
+                      try {
+                        const caps = JSON.parse(user.capabilities || "[]");
+                        if (caps.includes(item.capability)) return true;
+                      } catch (e) {
+                        return false;
+                      }
+                    }
+                    return false;
+                  }
                   return true;
                 })
                 .map((item) => {

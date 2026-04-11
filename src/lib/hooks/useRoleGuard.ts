@@ -1,16 +1,17 @@
 import { useMemo } from "react";
 import { useAuth } from "./useAuth";
-import type { User } from "@/lib/db";
+import type { UserRole } from "@/lib/db";
 
-const ROLE_PRIORITY: Record<string, number> = {
-  viewer: 0,
-  editor: 1,
-  admin: 2,
+const ROLE_PRIORITY: Record<UserRole, number> = {
+  frontdesk: 0,
+  teacher: 1,
+  finance: 2,
+  admin: 3,
 };
 
-export function useRoleGuard(requiredRole: "admin" | "editor" | "viewer"): {
+export function useRoleGuard(requiredRole: UserRole): {
   hasAccess: boolean;
-  user: User | null;
+  user: ReturnType<typeof useAuth>["user"];
 } {
   const { user } = useAuth();
 

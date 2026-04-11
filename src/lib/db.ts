@@ -3,18 +3,22 @@ import { hashPassword, verifyPassword } from "./crypto";
 
 let dbInstance: Awaited<ReturnType<typeof Database.load>> | null = null;
 
-async function getDb() {
+export async function getDb() {
   if (!dbInstance) {
     dbInstance = await Database.load("sqlite:app.db");
   }
   return dbInstance;
 }
 
+export type UserRole = "admin" | "teacher" | "finance" | "frontdesk";
+export type UserCapability = "receive_payments" | "view_financials";
+
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: "admin" | "editor" | "viewer";
+  role: UserRole;
+  capabilities: string; // JSON string of UserCapability[]
   status: "active" | "inactive";
   password_hash: string;
   salt: string;
@@ -28,8 +32,87 @@ export interface NewUser {
   name: string;
   email: string;
   password: string;
-  role?: "admin" | "editor" | "viewer";
+  role?: UserRole;
   status?: "active" | "inactive";
+  capabilities?: UserCapability[];
+}
+
+export interface Student {
+  id: string;
+  admission_no: string;
+  name: string;
+  gender: "M" | "F";
+  date_of_birth?: string;
+  current_class: string;
+  class_id?: string;
+  status: "active" | "inactive" | "alumni";
+  image_path?: string;
+  created_at: string;
+  updated_at: string;
+  guardian_name?: string;
+  guardian_phone?: string;
+  guardian_email?: string;
+  guardian_relation?: string;
+  student_phone?: string;
+  student_email?: string;
+  address?: string;
+}
+
+export interface Class {
+  id: string;
+  name: string;
+  level: string;
+}
+
+export interface Subject {
+  id: string;
+  name: string;
+  code?: string;
+}
+
+export interface TeacherAssignment {
+  id: string;
+  teacher_id: string;
+  class_name: string;
+  subject_id: string;
+}
+
+export interface Attendance {
+  id: string;
+  student_id: string;
+  class_name: string;
+  date: string;
+  status: "present" | "absent" | "late" | "excused";
+  remarks?: string;
+  recorded_by: string;
+}
+
+export interface Mark {
+  id: string;
+  student_id: string;
+  subject_id: string;
+  class_name: string;
+  term: number;
+  year: number;
+  opening_mark: number;
+  mid_term_mark: number;
+  end_term_mark: number;
+  total_mark: number;
+  grade?: string;
+  remarks?: string;
+  recorded_by: string;
+}
+
+export interface Payment {
+  id: string;
+  student_id: string;
+  amount: number;
+  payment_date: string;
+  payment_method: string;
+  reference_no?: string;
+  category: string;
+  recorded_by: string;
+  remarks?: string;
 }
 
 export interface LoginAttempt {
@@ -60,13 +143,14 @@ export const queries = {
       const { hash, salt } = await hashPassword(data.password);
       const id = generateId();
       const now = new Date().toISOString();
-      const role = data.role || "viewer";
+      const role = data.role || "teacher";
       const status = data.status || "active";
 
       const database = await getDb();
+      const capabilities = JSON.stringify(data.capabilities || []);
       await database.execute(
-        "INSERT INTO users (id, name, email, role, status, password_hash, salt, first_login, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-        [id, data.name, data.email, role, status, hash, salt, true, now, now]
+        "INSERT INTO users (id, name, email, role, status, password_hash, salt, first_login, created_at, updated_at, capabilities) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        [id, data.name, data.email, role, status, hash, salt, true, now, now, capabilities]
       );
 
       return {
@@ -80,6 +164,7 @@ export const queries = {
         first_login: true,
         created_at: now,
         updated_at: now,
+        capabilities,
       };
     },
 
@@ -147,6 +232,7 @@ export const queries = {
           first_login: user.first_login,
           created_at: user.created_at,
           updated_at: user.updated_at,
+          capabilities: user.capabilities,
         },
         token,
       };
@@ -215,12 +301,13 @@ export const queries = {
         const database = await getDb();
         const id = generateId();
         const now = new Date().toISOString();
-        const role = user.role || "viewer";
+        const role = user.role || "teacher";
         const status = user.status || "active";
+        const capabilities = JSON.stringify(user.capabilities || []);
 
         await database.execute(
-          "INSERT INTO users (id, name, email, role, status, password_hash, salt, first_login, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-          [id, user.name, user.email, role, status, hash, salt, true, now, now]
+          "INSERT INTO users (id, name, email, role, status, password_hash, salt, first_login, created_at, updated_at, capabilities) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+          [id, user.name, user.email, role, status, hash, salt, true, now, now, capabilities]
         );
 
         return {
@@ -234,6 +321,7 @@ export const queries = {
           first_login: true,
           created_at: now,
           updated_at: now,
+          capabilities,
         };
       } catch (error) {
         console.error("create error:", error);
@@ -264,6 +352,10 @@ export const queries = {
         if (data.status !== undefined) {
           fields.push(`status = $${paramIndex++}`);
           values.push(data.status);
+        }
+        if (data.capabilities !== undefined) {
+          fields.push(`capabilities = $${paramIndex++}`);
+          values.push(JSON.stringify(data.capabilities));
         }
 
         values.push(id);
@@ -390,4 +482,284 @@ export const queries = {
       }
     },
   },
+  students: {
+    findAll: async (): Promise<Student[]> => {
+      const database = await getDb();
+      return database.select<Student[]>("SELECT * FROM students ORDER BY name ASC");
+    },
+    findById: async (id: string): Promise<Student | null> => {
+      const database = await getDb();
+      const results = await database.select<Student[]>("SELECT * FROM students WHERE id = $1", [id]);
+      return results[0] || null;
+    },
+    create: async (student: Omit<Student, "id" | "created_at" | "updated_at">): Promise<Student> => {
+      const database = await getDb();
+      const id = generateId();
+      const now = new Date().toISOString();
+      await database.execute(
+        "INSERT INTO students (id, admission_no, name, gender, date_of_birth, current_class, status, image_path, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        [id, student.admission_no, student.name, student.gender, student.date_of_birth, student.current_class, student.status, student.image_path, now, now]
+      );
+      return { ...student, id, created_at: now, updated_at: now };
+    },
+    update: async (id: string, data: Partial<Student>): Promise<void> => {
+      const database = await getDb();
+      const now = new Date().toISOString();
+      const fields = ["updated_at = $1"];
+      const values: any[] = [now];
+      let i = 2;
+      Object.entries(data).forEach(([key, val]) => {
+        if (["id", "created_at", "updated_at"].includes(key)) return;
+        fields.push(`${key} = $${i++}`);
+        values.push(val);
+      });
+      values.push(id);
+      await database.execute(`UPDATE students SET ${fields.join(", ")} WHERE id = $${i}`, values);
+    },
+    delete: async (id: string): Promise<void> => {
+      const database = await getDb();
+      await database.execute("DELETE FROM students WHERE id = $1", [id]);
+    },
+    updateImagePath: async (id: string, path: string | null): Promise<void> => {
+      const database = await getDb();
+      await database.execute("UPDATE students SET image_path = $1, updated_at = $2 WHERE id = $3", [path, new Date().toISOString(), id]);
+    }
+  },
+  classes: {
+    findAll: async (): Promise<Class[]> => {
+      const database = await getDb();
+      return database.select<Class[]>("SELECT * FROM classes ORDER BY level ASC, name ASC");
+    },
+    create: async (c: Omit<Class, "id">): Promise<Class> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute("INSERT INTO classes (id, name, level) VALUES ($1, $2, $3)", [id, c.name, c.level]);
+      return { ...c, id };
+    },
+    update: async (id: string, data: Partial<Class>): Promise<void> => {
+      const database = await getDb();
+      const fields: string[] = [];
+      const values: any[] = [];
+      let i = 1;
+      Object.entries(data).forEach(([key, val]) => {
+        if (key === "id") return;
+        fields.push(`${key} = $${i++}`);
+        values.push(val);
+      });
+      values.push(id);
+      await database.execute(`UPDATE classes SET ${fields.join(", ")} WHERE id = $${i}`, values);
+    },
+    delete: async (id: string): Promise<void> => {
+      const database = await getDb();
+      await database.execute("DELETE FROM classes WHERE id = $1", [id]);
+    }
+  },
+  subjects: {
+    findAll: async (): Promise<Subject[]> => {
+      const database = await getDb();
+      return database.select<Subject[]>("SELECT * FROM subjects ORDER BY name ASC");
+    },
+    create: async (subject: Omit<Subject, "id">): Promise<Subject> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute("INSERT INTO subjects (id, name, code) VALUES ($1, $2, $3)", [id, subject.name, subject.code]);
+      return { ...subject, id };
+    },
+    delete: async (id: string): Promise<void> => {
+      const database = await getDb();
+      await database.execute("DELETE FROM subjects WHERE id = $1", [id]);
+    }
+  },
+  academic: {
+    assignTeacher: async (assignment: Omit<TeacherAssignment, "id">): Promise<void> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute(
+        "INSERT INTO teacher_assignments (id, teacher_id, class_name, subject_id) VALUES ($1, $2, $3, $4)",
+        [id, assignment.teacher_id, assignment.class_name, assignment.subject_id]
+      );
+    },
+    getAttendance: async (className: string, date: string): Promise<Attendance[]> => {
+      const database = await getDb();
+      return database.select<Attendance[]>("SELECT * FROM attendance WHERE class_name = $1 AND date = $2", [className, date]);
+    },
+    recordAttendance: async (attendance: Omit<Attendance, "id">): Promise<void> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute(
+        "INSERT INTO attendance (id, student_id, class_name, date, status, remarks, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [id, attendance.student_id, attendance.class_name, attendance.date, attendance.status, attendance.remarks, attendance.recorded_by]
+      );
+    },
+    getMarks: async (studentId: string): Promise<Mark[]> => {
+      const database = await getDb();
+      return database.select<Mark[]>("SELECT * FROM marks WHERE student_id = $1", [studentId]);
+    },
+    recordMarks: async (mark: Omit<Mark, "id" | "total_mark">): Promise<void> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute(
+        "INSERT OR REPLACE INTO marks (id, student_id, subject_id, class_name, term, year, opening_mark, mid_term_mark, end_term_mark, grade, remarks, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        [id, mark.student_id, mark.subject_id, mark.class_name, mark.term, mark.year, mark.opening_mark, mark.mid_term_mark, mark.end_term_mark, mark.grade, mark.remarks, mark.recorded_by]
+      );
+    }
+  },
+  finance: {
+    getPayments: async (studentId?: string): Promise<Payment[]> => {
+      const database = await getDb();
+      if (studentId) {
+        return database.select<Payment[]>("SELECT * FROM payments WHERE student_id = $1 ORDER BY payment_date DESC", [studentId]);
+      }
+      return database.select<Payment[]>("SELECT * FROM payments ORDER BY payment_date DESC");
+    },
+    recordPayment: async (payment: Omit<Payment, "id">): Promise<void> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute(
+        "INSERT INTO payments (id, student_id, amount, payment_date, payment_method, reference_no, category, recorded_by, remarks) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        [id, payment.student_id, payment.amount, payment.payment_date, payment.payment_method, payment.reference_no, payment.category, payment.recorded_by, payment.remarks]
+      );
+    }
+  },
+  dashboard: {
+    getStats: async () => {
+      const database = await getDb();
+      const [students, users, classes, recentPayments, monthlyRevenue] = await Promise.all([
+        database.select<{ count: number }[]>("SELECT COUNT(*) as count FROM students WHERE status = 'active'"),
+        database.select<{ count: number }[]>("SELECT COUNT(*) as count FROM users WHERE status = 'active'"),
+        database.select<{ count: number }[]>("SELECT COUNT(*) as count FROM classes"),
+        database.select<(Payment & { student_name: string })[]>(`
+          SELECT p.*, s.name as student_name 
+          FROM payments p 
+          LEFT JOIN students s ON p.student_id = s.id 
+          ORDER BY p.payment_date DESC 
+          LIMIT 5
+        `),
+        database.select<{ total: number }[]>(`
+          SELECT COALESCE(SUM(amount), 0) as total 
+          FROM payments 
+          WHERE strftime('%Y-%m', payment_date) = strftime('%Y-%m', 'now')
+        `),
+      ]);
+      return {
+        students: students[0]?.count ?? 0,
+        users: users[0]?.count ?? 0,
+        classes: classes[0]?.count ?? 0,
+        recentPayments,
+        monthlyRevenue: monthlyRevenue[0]?.total ?? 0,
+      };
+    },
+  },
+  fees: {
+    getStudentBalance: async (studentId: string) => {
+      const database = await getDb();
+      const fees = await database.select<{ category: string; amount_due: number; amount_paid: number }[]>(
+        "SELECT category, SUM(amount_due) as amount_due, SUM(amount_paid) as amount_paid FROM student_fees WHERE student_id = $1 GROUP BY category",
+        [studentId]
+      );
+      const totalDue = fees.reduce((sum, f) => sum + f.amount_due, 0);
+      const totalPaid = fees.reduce((sum, f) => sum + f.amount_paid, 0);
+      return {
+        breakdown: fees,
+        totalDue,
+        totalPaid,
+        balance: totalDue - totalPaid,
+      };
+    },
+    createOrUpdateFee: async (studentId: string, category: string, amountDue: number, term: number, year: number) => {
+      const database = await getDb();
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      await database.execute(
+        `INSERT INTO student_fees (id, student_id, category, amount_due, term, year, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT(student_id, category, term, year) 
+         DO UPDATE SET amount_due = $4, updated_at = $8`,
+        [id, studentId, category, amountDue, term, year, now, now]
+      );
+    },
+    recordPaymentOnAccount: async (studentId: string, category: string, amount: number, term: number, year: number) => {
+      const database = await getDb();
+      const now = new Date().toISOString();
+      await database.execute(
+        `INSERT INTO student_fees (id, student_id, category, amount_paid, term, year, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT(student_id, category, term, year) 
+         DO UPDATE SET amount_paid = amount_paid + $4, updated_at = $8`,
+        [crypto.randomUUID(), studentId, category, amount, term, year, now, now]
+      );
+    },
+    getOutstandingBalance: async () => {
+      const database = await getDb();
+      return database.select<{
+        student_id: string;
+        student_name: string;
+        class: string;
+        total_due: number;
+        total_paid: number;
+        balance: number;
+      }[]>(`
+        SELECT 
+          sf.student_id,
+          s.name as student_name,
+          s.current_class as class,
+          COALESCE(SUM(sf.amount_due), 0) as total_due,
+          COALESCE(SUM(sf.amount_paid), 0) as total_paid,
+          COALESCE(SUM(sf.amount_due), 0) - COALESCE(SUM(sf.amount_paid), 0) as balance
+        FROM student_fees sf
+        JOIN students s ON sf.student_id = s.id
+        GROUP BY sf.student_id
+        HAVING balance > 0
+        ORDER BY balance DESC
+      `);
+    },
+  },
+  timetable: {
+    getByClass: async (className: string) => {
+      const database = await getDb();
+      return database.select<{
+        id: string;
+        class_name: string;
+        day_of_week: number;
+        period: number;
+        subject_id: string;
+        subject_name: string;
+        teacher_id: string | null;
+        start_time: string | null;
+        end_time: string | null;
+      }[]>(`
+        SELECT t.*, sub.name as subject_name 
+        FROM timetable t 
+        LEFT JOIN subjects sub ON t.subject_id = sub.id 
+        WHERE t.class_name = $1 
+        ORDER BY t.day_of_week, t.period
+      `, [className]);
+    },
+    createOrUpdate: async (entry: {
+      class_name: string;
+      day_of_week: number;
+      period: number;
+      subject_id: string;
+      teacher_id?: string;
+      start_time?: string;
+      end_time?: string;
+    }) => {
+      const database = await getDb();
+      const id = crypto.randomUUID();
+      await database.execute(
+        `INSERT INTO timetable (id, class_name, day_of_week, period, subject_id, teacher_id, start_time, end_time) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT(class_name, day_of_week, period) 
+         DO UPDATE SET subject_id = $5, teacher_id = $6, start_time = $7, end_time = $8`,
+        [id, entry.class_name, entry.day_of_week, entry.period, entry.subject_id, entry.teacher_id || null, entry.start_time || null, entry.end_time || null]
+      );
+    },
+    delete: async (className: string, dayOfWeek: number, period: number) => {
+      const database = await getDb();
+      await database.execute(
+        "DELETE FROM timetable WHERE class_name = $1 AND day_of_week = $2 AND period = $3",
+        [className, dayOfWeek, period]
+      );
+    },
+  }
 };

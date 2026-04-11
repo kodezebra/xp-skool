@@ -12,6 +12,10 @@ import Settings from "./settings";
 import Login from "./login";
 import ChangePassword from "./change-password";
 import SetupWizard from "./setup";
+import Students from "./students";
+import StudentDetail from "./students.$studentId";
+import Academic from "./academic";
+import Finance from "./finance";
 
 function useDocumentTitle() {
   const { appName, isReady } = useApp();
@@ -26,6 +30,9 @@ function useDocumentTitle() {
       "/settings": "Settings",
       "/login": "Login",
       "/change-password": "Change Password",
+      "/students": "Students",
+      "/academic": "Academic",
+      "/finance": "Finance",
     };
 
     let pageTitle = appName;
@@ -65,8 +72,8 @@ function ProtectedRoute({ children }: { children?: React.ReactNode }) {
   return children ? <>{children}</> : <Outlet />;
 }
 
-function RoleGuard({ role, children }: { role: "admin" | "editor" | "viewer"; children?: React.ReactNode }) {
-  const { hasAccess } = useRoleGuard(role);
+function RoleGuard({ role, children }: { role: string; children?: React.ReactNode }) {
+  const { hasAccess } = useRoleGuard(role as any);
 
   if (!hasAccess) {
     return <Navigate to="/" replace />;
@@ -115,6 +122,10 @@ function Router() {
         <Route element={<PasswordChangeGuard />}>
           <Route element={<AppLayout />}>
             <Route index element={<Dashboard />} />
+            <Route path="students" element={<Students />} />
+            <Route path="students/:studentId" element={<StudentDetail />} />
+            <Route path="academic" element={<Academic />} />
+            <Route path="finance" element={<Finance />} />
             <Route
               path="users"
               element={<RoleGuard role="admin"><Users /></RoleGuard>}
