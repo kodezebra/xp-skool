@@ -11,6 +11,7 @@ interface AppContextType {
   appName: string;
   setAppName: (name: string) => void;
   isReady: boolean;
+  schoolType: string;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -24,6 +25,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>("system");
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
   const [appName, setAppName] = useState("");
+  const [schoolType, setSchoolType] = useState("");
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -64,6 +66,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (settingsMap.app_name) {
           setAppName(settingsMap.app_name);
         }
+        if (settingsMap.school_type) {
+          setSchoolType(settingsMap.school_type);
+        }
       } catch (error) {
         console.error("Failed to load settings:", error);
       } finally {
@@ -97,7 +102,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [appName, isReady]);
 
   return (
-    <AppContext.Provider value={{ theme, setTheme, resolvedTheme, appName, setAppName: handleSetAppName, isReady }}>
+    <AppContext.Provider value={{ theme, setTheme, resolvedTheme, appName, setAppName: handleSetAppName, isReady, schoolType }}>
       {children}
     </AppContext.Provider>
   );

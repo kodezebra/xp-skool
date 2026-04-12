@@ -22,6 +22,7 @@ interface ClassData {
   id?: string;
   name: string;
   level: string;
+  category: "primary" | "secondary" | "tertiary";
 }
 
 interface ClassSheetProps {
@@ -32,7 +33,13 @@ interface ClassSheetProps {
   isSaving: boolean;
 }
 
-const LEVELS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "S1", "S2", "S3", "S4", "S5", "S6"];
+const CATEGORIES = [
+  { value: "primary", label: "Primary (P1-P7)" },
+  { value: "secondary", label: "Secondary (S1-S6)" },
+  { value: "tertiary", label: "Tertiary (Year 1-3)" },
+] as const;
+
+const LEVELS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "S1", "S2", "S3", "S4", "S5", "S6", "Year 1", "Year 2", "Year 3"];
 
 export function ClassSheet({
   open,
@@ -43,20 +50,23 @@ export function ClassSheet({
 }: ClassSheetProps) {
   const [name, setName] = useState("");
   const [level, setLevel] = useState("P1");
+  const [category, setCategory] = useState<"primary" | "secondary" | "tertiary">("primary");
 
   useEffect(() => {
     if (classData) {
       setName(classData.name);
       setLevel(classData.level);
+      setCategory(classData.category);
     } else {
       setName("");
       setLevel("P1");
+      setCategory("primary");
     }
   }, [classData, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ name, level });
+    onSave({ name, level, category });
   };
 
   const isEditing = !!classData;
@@ -77,6 +87,20 @@ export function ClassSheet({
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="category">Category</Label>
+              <Select value={category} onValueChange={(v: "primary" | "secondary" | "tertiary") => setCategory(v)}>
+                <SelectTrigger id="category">
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((cat) => (
+                    <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="level">Level</Label>
               <Select value={level} onValueChange={setLevel}>

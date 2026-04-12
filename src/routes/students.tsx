@@ -11,8 +11,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useStudents } from "@/lib/hooks/useStudents";
+import { useClasses } from "@/lib/hooks/useClasses";
 import { StudentSheet } from "@/components/students/StudentSheet";
 import { useToast } from "@/lib/hooks/useToast";
+import { useApp } from "@/lib/context/AppContext";
 import type { Student } from "@/lib/db";
 import { Link } from "react-router-dom";
 
@@ -20,6 +22,8 @@ const PAGE_SIZE = 20;
 
 export default function Students() {
   const toast = useToast();
+  const { classes: allClasses } = useClasses();
+  const { schoolType } = useApp();
   const { 
     students, 
     isLoading, 
@@ -42,6 +46,21 @@ export default function Students() {
     studentName: "",
   });
 
+  const categoryMap: Record<string, string[]> = {
+    primary: ["primary"],
+    secondary: ["secondary"],
+    college: ["tertiary"],
+    vocational: ["tertiary"],
+  };
+  const allowedCategories = categoryMap[schoolType] || ["primary", "secondary", "tertiary"];
+  const classes = useMemo(() => {
+    const classSet = new Set(students.filter(s => allowedCategories.some(cat => {
+      const c = allClasses.find(cl => cl.name === s.current_class);
+      return c?.category === cat;
+    })).map(s => s.current_class));
+    return Array.from(classSet).sort();
+  }, [students, allClasses, allowedCategories]);
+
   const handleRegister = () => {
     setEditingStudent(null);
     setModalOpen(true);
@@ -62,11 +81,6 @@ export default function Students() {
     }
     setModalOpen(false);
   };
-
-  const classes = useMemo(() => {
-    const classSet = new Set(students.map(s => s.current_class));
-    return Array.from(classSet).sort();
-  }, [students]);
 
   const filteredStudents = useMemo(() => {
     return students.filter(s => {

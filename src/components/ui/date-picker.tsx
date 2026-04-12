@@ -44,7 +44,7 @@ function DatePicker({ className, selected, onSelect, showYearPicker }: DatePicke
             setOpen(false)
           }}
           initialFocus
-          captionLayout={showYearPicker ? "dropdown-buttons" : "label"}
+          captionLayout={showYearPicker ? "dropdown" : "label"}
           fromYear={showYearPicker ? 1900 : undefined}
           toYear={showYearPicker ? new Date().getFullYear() : undefined}
         />

@@ -58,10 +58,13 @@ export interface Student {
   address?: string;
 }
 
+export type ClassCategory = "primary" | "secondary" | "tertiary";
+
 export interface Class {
   id: string;
   name: string;
   level: string;
+  category: ClassCategory;
 }
 
 export interface Subject {
@@ -83,6 +86,8 @@ export interface Attendance {
   class_name: string;
   date: string;
   status: "present" | "absent" | "late" | "excused";
+  check_in?: string;
+  check_out?: string;
   remarks?: string;
   recorded_by: string;
 }
@@ -530,10 +535,24 @@ export const queries = {
       const database = await getDb();
       return database.select<Class[]>("SELECT * FROM classes ORDER BY level ASC, name ASC");
     },
+    findBySchoolType: async (schoolType: string): Promise<Class[]> => {
+      const database = await getDb();
+      const categoryMap: Record<string, ClassCategory> = {
+        primary: "primary",
+        secondary: "secondary",
+        college: "tertiary",
+        vocational: "tertiary",
+      };
+      const category = categoryMap[schoolType] || "tertiary";
+      return database.select<Class[]>(
+        "SELECT * FROM classes WHERE category = $1 ORDER BY level ASC, name ASC",
+        [category]
+      );
+    },
     create: async (c: Omit<Class, "id">): Promise<Class> => {
       const database = await getDb();
       const id = generateId();
-      await database.execute("INSERT INTO classes (id, name, level) VALUES ($1, $2, $3)", [id, c.name, c.level]);
+      await database.execute("INSERT INTO classes (id, name, level, category) VALUES ($1, $2, $3, $4)", [id, c.name, c.level, c.category]);
       return { ...c, id };
     },
     update: async (id: string, data: Partial<Class>): Promise<void> => {
@@ -587,8 +606,8 @@ export const queries = {
       const database = await getDb();
       const id = generateId();
       await database.execute(
-        "INSERT INTO attendance (id, student_id, class_name, date, status, remarks, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        [id, attendance.student_id, attendance.class_name, attendance.date, attendance.status, attendance.remarks, attendance.recorded_by]
+        "INSERT OR REPLACE INTO attendance (id, student_id, class_name, date, status, check_in, check_out, remarks, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        [id, attendance.student_id, attendance.class_name, attendance.date, attendance.status, attendance.check_in, attendance.check_out, attendance.remarks, attendance.recorded_by]
       );
     },
     getMarks: async (studentId: string): Promise<Mark[]> => {
@@ -615,9 +634,35 @@ export const queries = {
     recordPayment: async (payment: Omit<Payment, "id">): Promise<void> => {
       const database = await getDb();
       const id = generateId();
+      const now = new Date().toISOString();
+      
+      // Get current term/year from settings
+      const settings = await queries.settings.findAll();
+      const year = settings.find(s => s.key === "academic_year")?.value || new Date().getFullYear().toString();
+      
+      // Determine term based on current date and term dates in settings
+      const term1Start = settings.find(s => s.key === "term1_start")?.value;
+      const term2Start = settings.find(s => s.key === "term2_start")?.value;
+      const term3Start = settings.find(s => s.key === "term3_start")?.value;
+      
+      let term = 1;
+      const payDate = new Date(payment.payment_date);
+      if (term3Start && payDate >= new Date(term3Start)) term = 3;
+      else if (term2Start && payDate >= new Date(term2Start)) term = 2;
+
+      // 1. Record the payment
       await database.execute(
         "INSERT INTO payments (id, student_id, amount, payment_date, payment_method, reference_no, category, recorded_by, remarks) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         [id, payment.student_id, payment.amount, payment.payment_date, payment.payment_method, payment.reference_no, payment.category, payment.recorded_by, payment.remarks]
+      );
+
+      // 2. Update student_fees (increment amount_paid)
+      await database.execute(
+        `INSERT INTO student_fees (id, student_id, category, amount_paid, term, year, created_at, updated_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT(student_id, category, term, year) 
+         DO UPDATE SET amount_paid = amount_paid + $4, updated_at = $8`,
+        [crypto.randomUUID(), payment.student_id, payment.category, payment.amount, term, parseInt(year), now, now]
       );
     }
   },
@@ -712,6 +757,26 @@ export const queries = {
         HAVING balance > 0
         ORDER BY balance DESC
       `);
+    },
+    bulkApplyFees: async (className: string, term: number, year: number, items: { category: string; amount: number }[]) => {
+      const database = await getDb();
+      const students = await database.select<{ id: string }[]>(
+        "SELECT id FROM students WHERE current_class = $1 AND status = 'active'",
+        [className]
+      );
+      const now = new Date().toISOString();
+
+      for (const student of students) {
+        for (const item of items) {
+          await database.execute(
+            `INSERT INTO student_fees (id, student_id, category, amount_due, term, year, created_at, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT(student_id, category, term, year) 
+             DO UPDATE SET amount_due = $4, updated_at = $8`,
+            [crypto.randomUUID(), student.id, item.category, item.amount, term, year, now, now]
+          );
+        }
+      }
     },
   },
   timetable: {

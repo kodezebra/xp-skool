@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Sheet,
   SheetContent,
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import type { Student } from "@/lib/db";
 import { useClasses } from "@/lib/hooks/useClasses";
+import { useApp } from "@/lib/context/AppContext";
 
 interface StudentSheetProps {
   open: boolean;
@@ -29,6 +30,13 @@ interface StudentSheetProps {
   isSaving: boolean;
 }
 
+const CATEGORY_MAP: Record<string, string[]> = {
+  primary: ["primary"],
+  secondary: ["secondary"],
+  college: ["tertiary"],
+  vocational: ["tertiary"],
+};
+
 export function StudentSheet({
   open,
   onOpenChange,
@@ -37,7 +45,14 @@ export function StudentSheet({
   isSaving,
 }: StudentSheetProps) {
   const { classes } = useClasses();
+  const { schoolType } = useApp();
   const [name, setName] = useState("");
+
+  const filteredClasses = useMemo(() => {
+    const allowedCategories = CATEGORY_MAP[schoolType] || ["primary", "secondary", "tertiary"];
+    return classes.filter(c => allowedCategories.includes(c.category));
+  }, [classes, schoolType]);
+
   const [admissionNo, setAdmissionNo] = useState("");
   const [gender, setGender] = useState<"M" | "F">("M");
   const [dob, setDob] = useState("");
@@ -46,24 +61,34 @@ export function StudentSheet({
   const [status, setStatus] = useState<"active" | "inactive" | "alumni">("active");
 
   useEffect(() => {
-    if (student) {
-      setName(student.name);
-      setAdmissionNo(student.admission_no);
-      setGender(student.gender);
-      setDob(student.date_of_birth || "");
-      setCurrentClass(student.current_class);
-      setClassId(student.class_id || "");
-      setStatus(student.status);
-    } else {
-      setName("");
-      setAdmissionNo("");
-      setGender("M");
-      setDob("");
-      setCurrentClass(classes[0]?.name || "");
-      setClassId(classes[0]?.id || "");
-      setStatus("active");
+    if (open) {
+      if (student) {
+        setName(student.name);
+        setAdmissionNo(student.admission_no);
+        setGender(student.gender);
+        setDob(student.date_of_birth || "");
+        setCurrentClass(student.current_class);
+        setClassId(student.class_id || "");
+        setStatus(student.status);
+      } else {
+        setName("");
+        setAdmissionNo("");
+        setGender("M");
+        setDob("");
+        setCurrentClass(filteredClasses[0]?.name || "");
+        setClassId(filteredClasses[0]?.id || "");
+        setStatus("active");
+      }
     }
-  }, [student, open, classes]);
+  }, [student, open]);
+
+  // Handle case where classes load after the sheet is already open
+  useEffect(() => {
+    if (open && !student && !classId && filteredClasses.length > 0) {
+      setClassId(filteredClasses[0].id);
+      setCurrentClass(filteredClasses[0].name);
+    }
+  }, [open, student, filteredClasses, classId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +105,7 @@ export function StudentSheet({
   };
 
   const handleClassChange = (selectedId: string) => {
-    const selectedClass = classes.find(c => c.id === selectedId);
+    const selectedClass = filteredClasses.find(c => c.id === selectedId);
     if (selectedClass) {
       setClassId(selectedId);
       setCurrentClass(selectedClass.name);
@@ -91,7 +116,7 @@ export function StudentSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="sm:max-w-[500px] overflow-y-auto p-10 sm:p-12">
+      <SheetContent className="sm:max-w-[500px] overflow-y-auto p-10 sm:p-12" side="right">
         <SheetHeader className="mb-8">
           <SheetTitle>
             {isEditing ? "Edit Student Profile" : "Register New Student"}
@@ -160,7 +185,7 @@ export function StudentSheet({
                     <SelectValue placeholder="Select Class" />
                   </SelectTrigger>
                   <SelectContent>
-                    {classes.map(c => (
+                    {filteredClasses.map(c => (
                       <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                     ))}
                   </SelectContent>

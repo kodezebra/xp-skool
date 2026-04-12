@@ -3,11 +3,12 @@ import { queries } from "@/lib/db";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
 import { useClasses } from "@/lib/hooks/useClasses";
+import { useApp } from "@/lib/context/AppContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Check, X, FileText } from "lucide-react";
+import { Check, X, FileText, Clock, RotateCcw, LogOut, UserMinus, Timer } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
@@ -18,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Student, Attendance } from "@/lib/db";
+import { cn } from "@/lib/utils";
 
 export function meta() {
   return [{ title: "Academic" }];
@@ -67,12 +69,22 @@ function AttendanceTab() {
   const toast = useToast();
   const { user } = useAuth();
   const { classes } = useClasses();
+  const { schoolType } = useApp();
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<Record<string, Attendance["status"]>>({});
+  const [attendance, setAttendance] = useState<Record<string, Partial<Attendance>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const categoryMap: Record<string, string[]> = {
+    primary: ["primary"],
+    secondary: ["secondary"],
+    college: ["tertiary"],
+    vocational: ["tertiary"],
+  };
+  const allowedCategories = categoryMap[schoolType] || ["primary", "secondary", "tertiary"];
+  const filteredClasses = classes.filter(c => allowedCategories.includes(c.category));
 
   useEffect(() => {
     if (selectedClass) {
@@ -98,9 +110,9 @@ function AttendanceTab() {
   async function loadAttendance() {
     try {
       const records = await queries.academic.getAttendance(selectedClass, selectedDate);
-      const attendanceMap: Record<string, Attendance["status"]> = {};
+      const attendanceMap: Record<string, Partial<Attendance>> = {};
       records.forEach((r) => {
-        attendanceMap[r.student_id] = r.status;
+        attendanceMap[r.student_id] = r;
       });
       setAttendance(attendanceMap);
     } catch (error) {
@@ -113,12 +125,15 @@ function AttendanceTab() {
     setIsSaving(true);
     try {
       for (const student of students) {
-        const status = attendance[student.id] || "present";
+        const record = attendance[student.id] || { status: "absent" };
         await queries.academic.recordAttendance({
           student_id: student.id,
           class_name: selectedClass,
           date: selectedDate,
-          status,
+          status: record.status || "absent",
+          check_in: record.check_in,
+          check_out: record.check_out,
+          remarks: record.remarks,
           recorded_by: user.id,
         });
       }
@@ -131,34 +146,73 @@ function AttendanceTab() {
     }
   }
 
+  const getNow = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  function handleCheckIn(studentId: string) {
+    setAttendance(prev => ({
+      ...prev,
+      [studentId]: { 
+        ...prev[studentId], 
+        status: "present", 
+        check_in: getNow() 
+      }
+    }));
+  }
+
+  function handleCheckOut(studentId: string) {
+    setAttendance(prev => ({
+      ...prev,
+      [studentId]: { 
+        ...prev[studentId], 
+        check_out: getNow() 
+      }
+    }));
+  }
+
+  function handleMarkLate(studentId: string) {
+    setAttendance(prev => {
+      const current = prev[studentId] || {};
+      return {
+        ...prev,
+        [studentId]: { 
+          ...current, 
+          status: current.status === "late" ? "present" : "late",
+          check_in: current.check_in || getNow()
+        }
+      };
+    });
+  }
+
+  function handleReset(studentId: string) {
+    setAttendance(prev => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
+  }
+
   function setAllPresent() {
-    const newAttendance: Record<string, Attendance["status"]> = {};
+    const now = getNow();
+    const newAttendance: Record<string, Partial<Attendance>> = {};
     students.forEach((s) => {
-      newAttendance[s.id] = "present";
+      newAttendance[s.id] = { status: "present", check_in: now };
     });
     setAttendance(newAttendance);
   }
 
-  function markAllAbsent() {
-    const newAttendance: Record<string, Attendance["status"]> = {};
-    students.forEach((s) => {
-      newAttendance[s.id] = "absent";
-    });
-    setAttendance(newAttendance);
-  }
-
-  const presentCount = Object.values(attendance).filter((s) => s === "present").length;
-  const absentCount = students.length - presentCount;
+  const presentInSchool = Object.values(attendance).filter((s) => (s.status === "present" || s.status === "late") && !s.check_out).length;
+  const completed = Object.values(attendance).filter((s) => s.check_out).length;
+  const absentCount = students.length - (presentInSchool + completed);
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Daily Attendance</CardTitle>
-          <CardDescription>Record student attendance for a specific class and date</CardDescription>
+          <CardTitle>Attendance Flow</CardTitle>
+          <CardDescription>Click once to Check In, click again to Check Out. Simple & Fast.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-4 items-end">
             <div className="space-y-2">
               <Label>Class</Label>
               <Select value={selectedClass} onValueChange={setSelectedClass}>
@@ -166,10 +220,8 @@ function AttendanceTab() {
                   <SelectValue placeholder="Select class" />
                 </SelectTrigger>
                 <SelectContent>
-                  {classes.map((c) => (
-                    <SelectItem key={c.id} value={c.name}>
-                      {c.name}
-                    </SelectItem>
+                  {filteredClasses.map((c) => (
+                    <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -181,14 +233,9 @@ function AttendanceTab() {
                 onSelect={(date) => setSelectedDate(date ? date.toISOString().split('T')[0] : "")}
               />
             </div>
-            <div className="flex items-end gap-2">
-              <Button variant="outline" size="sm" onClick={setAllPresent}>
-                <Check className="size-4 mr-1" /> All Present
-              </Button>
-              <Button variant="outline" size="sm" onClick={markAllAbsent}>
-                <X className="size-4 mr-1" /> All Absent
-              </Button>
-            </div>
+            <Button variant="outline" size="sm" onClick={setAllPresent}>
+              <Check className="size-4 mr-1.5" /> All Present
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -196,60 +243,119 @@ function AttendanceTab() {
       {selectedClass && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-base">{selectedClass} - {selectedDate}</CardTitle>
-              <CardDescription>
-                {presentCount} present, {absentCount} absent
-              </CardDescription>
+            <div className="flex gap-4">
+              <div className="text-center px-4 border-r">
+                <p className="text-[10px] text-muted-foreground uppercase font-bold">In School</p>
+                <p className="text-xl font-bold text-green-600">{presentInSchool}</p>
+              </div>
+              <div className="text-center px-4 border-r">
+                <p className="text-[10px] text-muted-foreground uppercase font-bold">Departed</p>
+                <p className="text-xl font-bold text-blue-600">{completed}</p>
+              </div>
+              <div className="text-center px-4">
+                <p className="text-[10px] text-muted-foreground uppercase font-bold">Absent</p>
+                <p className="text-xl font-bold text-muted-foreground">{absentCount}</p>
+              </div>
             </div>
-            <Button onClick={saveAttendance} disabled={isSaving || isLoading}>
-              {isSaving ? "Saving..." : "Save Attendance"}
+            <Button onClick={saveAttendance} disabled={isSaving || isLoading} className="h-10 px-8">
+              {isSaving ? "Saving..." : "Save Today's Attendance"}
             </Button>
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <p className="text-center py-8 text-muted-foreground">Loading students...</p>
-            ) : students.length === 0 ? (
-              <p className="text-center py-8 text-muted-foreground">
-                No active students in {selectedClass}
-              </p>
+              <p className="text-center py-12 text-muted-foreground">Loading Students...</p>
             ) : (
-              <div className="border rounded-lg overflow-hidden">
+              <div className="border rounded-xl overflow-hidden shadow-sm">
                 <table className="w-full">
-                  <thead className="bg-muted/50">
+                  <thead className="bg-muted/50 border-b">
                     <tr>
-                      <th className="px-4 py-3 text-left text-sm font-medium">Student</th>
-                      <th className="px-4 py-3 text-left text-sm font-medium">Adm No</th>
-                      <th className="px-4 py-3 text-center text-sm font-medium">Status</th>
+                      <th className="px-6 py-4 text-left text-xs font-bold text-muted-foreground uppercase">Student</th>
+                      <th className="px-6 py-4 text-center text-xs font-bold text-muted-foreground uppercase">Status & Times</th>
+                      <th className="px-6 py-4 text-center text-xs font-bold text-muted-foreground uppercase">Main Action</th>
+                      <th className="px-6 py-4 text-center text-xs font-bold text-muted-foreground uppercase">Quick Fix</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
-                    {students.map((student) => (
-                      <tr key={student.id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 text-sm">{student.name}</td>
-                        <td className="px-4 py-3 text-sm text-muted-foreground">{student.admission_no}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-center gap-1">
-                            {(["present", "absent", "late", "excused"] as const).map((status) => (
-                              <button
-                                key={status}
-                                onClick={() => setAttendance((prev) => ({ ...prev, [student.id]: status }))}
-                                className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                                  attendance[student.id] === status
-                                    ? status === "present" ? "bg-green-100 text-green-700" :
-                                      status === "absent" ? "bg-red-100 text-red-700" :
-                                      status === "late" ? "bg-yellow-100 text-yellow-700" :
-                                      "bg-blue-100 text-blue-700"
-                                    : "bg-muted hover:bg-muted/80 text-muted-foreground"
-                                }`}
-                              >
-                                {status.charAt(0).toUpperCase() + status.slice(1)}
-                              </button>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody className="divide-y divide-border">
+                    {students.map((student) => {
+                      const record = attendance[student.id] || { status: "absent" };
+                      const isInSchool = (record.status === "present" || record.status === "late") && !record.check_out;
+                      const isCompleted = record.check_out;
+
+                      return (
+                        <tr key={student.id} className="hover:bg-muted/30 transition-all">
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-semibold">{student.name}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">{student.admission_no}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                             <div className="flex items-center justify-center gap-3">
+                               <div className="flex flex-col items-center">
+                                  <span className="text-[9px] uppercase font-bold text-muted-foreground">In</span>
+                                  <span className="text-xs font-mono font-bold">{record.check_in || "--:--"}</span>
+                               </div>
+                               <div className="h-4 w-px bg-border"></div>
+                               <div className="flex flex-col items-center">
+                                  <span className="text-[9px] uppercase font-bold text-muted-foreground">Out</span>
+                                  <span className="text-xs font-mono font-bold">{record.check_out || "--:--"}</span>
+                               </div>
+                               {record.status === "late" && (
+                                 <span className="px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-[8px] font-bold uppercase">Late</span>
+                               )}
+                             </div>
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                             {!record.check_in ? (
+                               <Button 
+                                 size="sm" 
+                                 className="w-32 bg-green-600 hover:bg-green-700 text-white font-bold h-9"
+                                 onClick={() => handleCheckIn(student.id)}
+                               >
+                                 CHECK IN
+                               </Button>
+                             ) : !record.check_out ? (
+                               <Button 
+                                 size="sm" 
+                                 variant="destructive"
+                                 className="w-32 font-bold h-9"
+                                 onClick={() => handleCheckOut(student.id)}
+                               >
+                                 <LogOut className="size-3 mr-1.5" />
+                                 CHECK OUT
+                               </Button>
+                             ) : (
+                               <div className="flex items-center justify-center gap-2 text-blue-600 font-bold text-xs uppercase">
+                                  <Check className="size-4" />
+                                  Completed
+                               </div>
+                             )}
+                          </td>
+                          <td className="px-6 py-4 text-center">
+                             <div className="flex items-center justify-center gap-2">
+                               <Button 
+                                 variant="ghost" 
+                                 size="icon-sm" 
+                                 title="Toggle Late Status"
+                                 className={cn("h-8 w-8", record.status === "late" && "text-yellow-600 bg-yellow-50")}
+                                 onClick={() => handleMarkLate(student.id)}
+                               >
+                                 <Timer className="size-4" />
+                               </Button>
+                               <Button 
+                                 variant="ghost" 
+                                 size="icon-sm" 
+                                 title="Reset Entry"
+                                 className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                 onClick={() => handleReset(student.id)}
+                               >
+                                 <RotateCcw className="size-4" />
+                               </Button>
+                             </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -265,6 +371,7 @@ function MarksTab() {
   const toast = useToast();
   const { user } = useAuth();
   const { classes } = useClasses();
+  const { schoolType } = useApp();
   const [subjects, setSubjects] = useState<{ id: string; name: string; code?: string }[]>([]);
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedSubject, setSelectedSubject] = useState("");
@@ -274,6 +381,15 @@ function MarksTab() {
   const [marks, setMarks] = useState<Record<string, { opening: number; mid: number; end: number }>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const categoryMap: Record<string, string[]> = {
+    primary: ["primary"],
+    secondary: ["secondary"],
+    college: ["tertiary"],
+    vocational: ["tertiary"],
+  };
+  const allowedCategories = categoryMap[schoolType] || ["primary", "secondary", "tertiary"];
+  const filteredClasses = classes.filter(c => allowedCategories.includes(c.category));
 
   useEffect(() => {
     loadSubjects();
@@ -375,7 +491,7 @@ function MarksTab() {
                   <SelectValue placeholder="Select class" />
                 </SelectTrigger>
                 <SelectContent>
-                  {classes.map((c) => (
+                  {filteredClasses.map((c) => (
                     <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -645,6 +761,7 @@ function Plus(props: React.SVGProps<SVGSVGElement>) {
 function TimetableTab() {
   const toast = useToast();
   const { classes } = useClasses();
+  const { schoolType } = useApp();
   const [subjects, setSubjects] = useState<{ id: string; name: string; code?: string }[]>([]);
   const [selectedClass, setSelectedClass] = useState("");
   const [entries, setEntries] = useState<any[]>([]);
@@ -655,6 +772,15 @@ function TimetableTab() {
 
   const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   const PERIODS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  const categoryMap: Record<string, string[]> = {
+    primary: ["primary"],
+    secondary: ["secondary"],
+    college: ["tertiary"],
+    vocational: ["tertiary"],
+  };
+  const allowedCategories = categoryMap[schoolType] || ["primary", "secondary", "tertiary"];
+  const filteredClasses = classes.filter(c => allowedCategories.includes(c.category));
 
   useEffect(() => {
     loadSubjects();
@@ -738,7 +864,7 @@ function TimetableTab() {
                   <SelectValue placeholder="Select class" />
                 </SelectTrigger>
                 <SelectContent>
-                  {classes.map((c) => (
+                  {filteredClasses.map((c) => (
                     <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>

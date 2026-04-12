@@ -61,7 +61,7 @@ export default function Settings() {
   
   const [activeTab, setActiveTab] = useState<"general" | "classes" | "academic" | "fees" | "system">("general");
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-  const [editingClass, setEditingClass] = useState<{ id?: string; name: string; level: string } | null>(null);
+  const [editingClass, setEditingClass] = useState<{ id?: string; name: string; level: string; category: "primary" | "secondary" | "tertiary" } | null>(null);
   const [schoolSettings, setSchoolSettings] = useState<SchoolSettings>({
     app_name: "",
     school_type: "",
@@ -236,12 +236,12 @@ export default function Settings() {
     setIsSheetOpen(true);
   };
 
-  const handleEdit = (c: { id: string; name: string; level: string }) => {
+  const handleEdit = (c: { id: string; name: string; level: string; category: "primary" | "secondary" | "tertiary" }) => {
     setEditingClass(c);
     setIsSheetOpen(true);
   };
 
-  const handleSaveClass = (data: { name: string; level: string }) => {
+  const handleSaveClass = (data: { name: string; level: string; category: "primary" | "secondary" | "tertiary" }) => {
     if (editingClass?.id) {
       updateClass({ id: editingClass.id, data });
       toast.success("Class updated");
@@ -334,12 +334,18 @@ export default function Settings() {
   }
 
   const groupedClasses = classes.reduce((acc, c) => {
-    if (!acc[c.level]) acc[c.level] = [];
-    acc[c.level].push(c);
+    const categoryLabel = c.category === "primary" ? "Primary" : c.category === "secondary" ? "Secondary" : "Tertiary";
+    if (!acc[categoryLabel]) acc[categoryLabel] = [];
+    acc[categoryLabel].push(c);
     return acc;
   }, {} as Record<string, typeof classes>);
 
-  const levels = Object.keys(groupedClasses).sort();
+  const categoryOrder = ["Primary", "Secondary", "Tertiary"];
+  const levels = Object.keys(groupedClasses).sort((a, b) => {
+    const aIdx = categoryOrder.indexOf(a);
+    const bIdx = categoryOrder.indexOf(b);
+    return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx);
+  });
 
   return (
     <div className="space-y-6">

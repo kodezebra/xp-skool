@@ -20,9 +20,10 @@ import {
 } from "@/components/ui/select";
 import { useStudents } from "@/lib/hooks/useStudents";
 import { useClasses } from "@/lib/hooks/useClasses";
-import { useFinance } from "@/lib/hooks/useFinance";
+import { useFinance, useFeeCategories } from "@/lib/hooks/useFinance";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useToast } from "@/lib/hooks/useToast";
+import { useApp } from "@/lib/context/AppContext";
 import { Search } from "lucide-react";
 
 interface PaymentSheetProps {
@@ -31,7 +32,6 @@ interface PaymentSheetProps {
   studentId?: string; // If provided, the student is pre-selected
 }
 
-const CATEGORIES = ["Tuition", "Uniform", "Lunch", "Transport", "Admission", "Other"];
 const METHODS = [
   { value: "cash", label: "Cash" },
   { value: "bank_transfer", label: "Bank Transfer" },
@@ -48,17 +48,34 @@ export function PaymentSheet({
   const { user } = useAuth();
   const { students } = useStudents();
   const { classes } = useClasses();
+  const { schoolType } = useApp();
   const { recordPayment, isRecording } = useFinance();
+  const { categories } = useFeeCategories();
 
   const [selectedClassId, setSelectedClassId] = useState<string>("all");
   const [studentSearch, setStudentSearch] = useState("");
   const [studentId, setStudentId] = useState("");
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("Tuition");
+  const [category, setCategory] = useState("");
   const [method, setMethod] = useState("cash");
   const [reference, setReference] = useState("");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [remarks, setRemarks] = useState("");
+
+  useEffect(() => {
+    if (categories.length > 0 && !category) {
+      setCategory(categories[0]);
+    }
+  }, [categories, category]);
+
+  const categoryMap: Record<string, string[]> = {
+    primary: ["primary"],
+    secondary: ["secondary"],
+    college: ["tertiary"],
+    vocational: ["tertiary"],
+  };
+  const allowedCategories = categoryMap[schoolType] || ["primary", "secondary", "tertiary"];
+  const filteredClasses = classes.filter(c => allowedCategories.includes(c.category));
 
   // Filter students based on class and search query
   const filteredStudents = useMemo(() => {
@@ -125,7 +142,7 @@ export function PaymentSheet({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Classes</SelectItem>
-                        {classes.map((c) => (
+                        {filteredClasses.map((c) => (
                           <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                         ))}
                       </SelectContent>
@@ -212,7 +229,7 @@ export function PaymentSheet({
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((cat) => (
+                    {categories.map((cat) => (
                       <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                     ))}
                   </SelectContent>
@@ -268,7 +285,7 @@ export function PaymentSheet({
             </Button>
             <Button
               type="submit"
-              disabled={isRecording || !studentId || !amount}
+              disabled={isRecording || !studentId || !amount || !category}
               className="flex-1"
             >
               {isRecording ? "Recording..." : "Complete Payment"}

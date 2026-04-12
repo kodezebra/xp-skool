@@ -250,6 +250,37 @@ pub fn run() {
             "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "add_category_to_classes",
+            sql: r#"
+                -- Add category column to classes table
+                ALTER TABLE classes ADD COLUMN category TEXT DEFAULT 'tertiary';
+
+                -- Auto-categorize existing classes based on name prefix
+                UPDATE classes SET category = 'primary' WHERE name LIKE 'P%';
+                UPDATE classes SET category = 'secondary' WHERE name LIKE 'S%';
+                UPDATE classes SET category = 'tertiary' WHERE name LIKE 'Year%' OR name LIKE 'Y%';
+            "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 13,
+            description: "add_check_in_out_to_attendance",
+            sql: r#"
+                ALTER TABLE attendance ADD COLUMN check_in TEXT;
+                ALTER TABLE attendance ADD COLUMN check_out TEXT;
+            "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 14,
+            description: "add_unique_to_attendance",
+            sql: r#"
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_student_date ON attendance(student_id, date);
+            "#,
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

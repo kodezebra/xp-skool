@@ -19,7 +19,7 @@ type Step = "school" | "admin" | "complete";
 
 interface SchoolInfo {
   name: string;
-  type: "primary" | "secondary" | "college" | "other";
+  type: "primary" | "secondary" | "college" | "vocational" | "other";
 }
 
 interface AdminInfo {
@@ -94,11 +94,15 @@ export default function SetupWizard() {
       // Pre-populate classes based on school type
       if (schoolInfo.type === "primary") {
         for (let i = 1; i <= 7; i++) {
-          await queries.classes.create({ name: `P${i}`, level: `P${i}` });
+          await queries.classes.create({ name: `P${i}`, level: `P${i}`, category: "primary" });
         }
       } else if (schoolInfo.type === "secondary") {
         for (let i = 1; i <= 6; i++) {
-          await queries.classes.create({ name: `S${i}`, level: `S${i}` });
+          await queries.classes.create({ name: `S${i}`, level: `S${i}`, category: "secondary" });
+        }
+      } else if (schoolInfo.type === "college" || schoolInfo.type === "vocational") {
+        for (let i = 1; i <= 3; i++) {
+          await queries.classes.create({ name: `Year ${i}`, level: `Year ${i}`, category: "tertiary" });
         }
       }
       
