@@ -22,7 +22,7 @@ interface ClassData {
   id?: string;
   name: string;
   level: string;
-  category: "primary" | "secondary" | "tertiary";
+  category: string;
 }
 
 interface ClassSheetProps {
@@ -36,10 +36,10 @@ interface ClassSheetProps {
 const CATEGORIES = [
   { value: "primary", label: "Primary (P1-P7)" },
   { value: "secondary", label: "Secondary (S1-S6)" },
-  { value: "tertiary", label: "Tertiary (Year 1-3)" },
+  { value: "tertiary", label: "Tertiary (Other)" },
 ] as const;
 
-const LEVELS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "S1", "S2", "S3", "S4", "S5", "S6", "Year 1", "Year 2", "Year 3"];
+const LEVELS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "S1", "S2", "S3", "S4", "S5", "S6", "Year 1", "Year 2", "Year 3", "Other"];
 
 export function ClassSheet({
   open,
@@ -50,23 +50,32 @@ export function ClassSheet({
 }: ClassSheetProps) {
   const [name, setName] = useState("");
   const [level, setLevel] = useState("P1");
-  const [category, setCategory] = useState<"primary" | "secondary" | "tertiary">("primary");
+  const [baseCategory, setBaseCategory] = useState<string>("primary");
+  const [customCategory, setCustomCategory] = useState("");
 
   useEffect(() => {
     if (classData) {
       setName(classData.name);
       setLevel(classData.level);
-      setCategory(classData.category);
+      if (["primary", "secondary"].includes(classData.category)) {
+        setBaseCategory(classData.category);
+        setCustomCategory("");
+      } else {
+        setBaseCategory("tertiary");
+        setCustomCategory(classData.category);
+      }
     } else {
       setName("");
       setLevel("P1");
-      setCategory("primary");
+      setBaseCategory("primary");
+      setCustomCategory("");
     }
   }, [classData, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ name, level, category });
+    const finalCategory = baseCategory === "tertiary" ? customCategory || "Tertiary" : baseCategory;
+    onSave({ name, level, category: finalCategory });
   };
 
   const isEditing = !!classData;
@@ -88,10 +97,10 @@ export function ClassSheet({
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select value={category} onValueChange={(v: "primary" | "secondary" | "tertiary") => setCategory(v)}>
+              <Label htmlFor="category">School Level</Label>
+              <Select value={baseCategory} onValueChange={setBaseCategory}>
                 <SelectTrigger id="category">
-                  <SelectValue placeholder="Select category" />
+                  <SelectValue placeholder="Select level" />
                 </SelectTrigger>
                 <SelectContent>
                   {CATEGORIES.map((cat) => (
@@ -101,11 +110,28 @@ export function ClassSheet({
               </Select>
             </div>
 
+            {baseCategory === "tertiary" && (
+              <div className="space-y-2">
+                <Label htmlFor="custom-category">Program / Course Name</Label>
+                <Input
+                  id="custom-category"
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  required
+                  placeholder="e.g. ICT, Nursing, Law"
+                  className="h-10"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Specify the course this class belongs to.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label htmlFor="level">Level</Label>
+              <Label htmlFor="level">Study Year / Grade</Label>
               <Select value={level} onValueChange={setLevel}>
                 <SelectTrigger id="level">
-                  <SelectValue placeholder="Select level" />
+                  <SelectValue placeholder="Select year" />
                 </SelectTrigger>
                 <SelectContent>
                   {LEVELS.map((l) => (
@@ -122,7 +148,7 @@ export function ClassSheet({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                placeholder="e.g. P1 North"
+                placeholder="e.g. Year 1 Day, P1 North"
                 className="h-10"
               />
               <p className="text-[10px] text-muted-foreground">
@@ -143,7 +169,7 @@ export function ClassSheet({
             </Button>
             <Button
               type="submit"
-              disabled={isSaving || !name}
+              disabled={isSaving || !name || (baseCategory === 'tertiary' && !customCategory)}
               className="flex-1"
             >
               {isSaving ? "Saving..." : isEditing ? "Save Changes" : "Create Class"}

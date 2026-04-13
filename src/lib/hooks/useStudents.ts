@@ -12,7 +12,8 @@ export function useStudents() {
   const createMutation = useMutation({
     mutationFn: (student: Omit<Student, "id" | "created_at" | "updated_at">) =>
       queries.students.create(student),
-    onSuccess: () => {
+    onSuccess: async (newStudent) => {
+      await queries.students.assignDefaultSubjectsByClass(newStudent.id, newStudent.current_class);
       queryClient.invalidateQueries({ queryKey: ["students"] });
     },
   });

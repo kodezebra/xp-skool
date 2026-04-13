@@ -281,6 +281,61 @@ pub fn run() {
             "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 15,
+            description: "create_student_subjects_table",
+            sql: r#"
+                CREATE TABLE IF NOT EXISTS student_subjects (
+                    id TEXT PRIMARY KEY,
+                    student_id TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+                    UNIQUE(student_id, subject_id)
+                );
+            "#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 16,
+            description: "flexible_academic_structure",
+            sql: r#"
+                -- 1. Allow any category name in classes (for Courses/Programs)
+                CREATE TABLE classes_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    level INTEGER NOT NULL,
+                    category TEXT NOT NULL
+                );
+                INSERT INTO classes_new SELECT * FROM classes;
+                DROP TABLE classes;
+                ALTER TABLE classes_new RENAME TO classes;
+
+                -- 2. Add category to subjects
+                ALTER TABLE subjects ADD COLUMN category TEXT DEFAULT 'General';
+
+                -- 3. Create a truly flexible marks table
+                CREATE TABLE IF NOT EXISTS assessment_marks (
+                    id TEXT PRIMARY KEY,
+                    student_id TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    class_name TEXT NOT NULL,
+                    term INTEGER NOT NULL,
+                    year INTEGER NOT NULL,
+                    assessment_name TEXT NOT NULL, -- e.g., 'Quiz 1', 'Final Exam'
+                    score REAL DEFAULT 0,
+                    recorded_by TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+                    FOREIGN KEY (recorded_by) REFERENCES users(id),
+                    UNIQUE(student_id, subject_id, term, year, assessment_name)
+                );
+            "#,
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

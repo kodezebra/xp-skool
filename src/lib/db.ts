@@ -92,6 +92,20 @@ export interface Attendance {
   recorded_by: string;
 }
 
+export interface AssessmentMark {
+  id: string;
+  student_id: string;
+  subject_id: string;
+  class_name: string;
+  term: number;
+  year: number;
+  assessment_name: string;
+  score: number;
+  recorded_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Mark {
   id: string;
   student_id: string;
@@ -528,7 +542,48 @@ export const queries = {
     updateImagePath: async (id: string, path: string | null): Promise<void> => {
       const database = await getDb();
       await database.execute("UPDATE students SET image_path = $1, updated_at = $2 WHERE id = $3", [path, new Date().toISOString(), id]);
+    },
+    assignDefaultSubjectsByClass: async (studentId: string, className: string): Promise<void> => {
+      const database = await getDb();
+      const teacherAssignments = await database.select<{ subject_id: string }[]>(
+        "SELECT DISTINCT subject_id FROM teacher_assignments WHERE class_name = $1",
+        [className]
+      );
+      
+      for (const assignment of teacherAssignments) {
+        const id = generateId();
+        await database.execute(
+          "INSERT OR IGNORE INTO student_subjects (id, student_id, subject_id) VALUES ($1, $2, $3)",
+          [id, studentId, assignment.subject_id]
+        );
+      }
     }
+  },
+  studentSubjects: {
+    findByStudent: async (studentId: string): Promise<{ id: string; name: string; code?: string }[]> => {
+      const database = await getDb();
+      return database.select(
+        `SELECT s.* FROM subjects s 
+         JOIN student_subjects ss ON s.id = ss.subject_id 
+         WHERE ss.student_id = $1`,
+        [studentId]
+      );
+    },
+    assign: async (studentId: string, subjectId: string): Promise<void> => {
+      const database = await getDb();
+      const id = generateId();
+      await database.execute(
+        "INSERT OR IGNORE INTO student_subjects (id, student_id, subject_id) VALUES ($1, $2, $3)",
+        [id, studentId, subjectId]
+      );
+    },
+    unassign: async (studentId: string, subjectId: string): Promise<void> => {
+      const database = await getDb();
+      await database.execute(
+        "DELETE FROM student_subjects WHERE student_id = $1 AND subject_id = $2",
+        [studentId, subjectId]
+      );
+    },
   },
   classes: {
     findAll: async (): Promise<Class[]> => {
@@ -620,6 +675,47 @@ export const queries = {
       await database.execute(
         "INSERT OR REPLACE INTO marks (id, student_id, subject_id, class_name, term, year, opening_mark, mid_term_mark, end_term_mark, grade, remarks, recorded_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         [id, mark.student_id, mark.subject_id, mark.class_name, mark.term, mark.year, mark.opening_mark, mark.mid_term_mark, mark.end_term_mark, mark.grade, mark.remarks, mark.recorded_by]
+      );
+    },
+    getAssessmentMarks: async (studentId?: string, className?: string, subjectId?: string, term?: number, year?: number): Promise<AssessmentMark[]> => {
+      const database = await getDb();
+      let query = "SELECT * FROM assessment_marks WHERE 1=1";
+      const params: any[] = [];
+      let i = 1;
+
+      if (studentId) {
+        query += ` AND student_id = $${i++}`;
+        params.push(studentId);
+      }
+      if (className) {
+        query += ` AND class_name = $${i++}`;
+        params.push(className);
+      }
+      if (subjectId) {
+        query += ` AND subject_id = $${i++}`;
+        params.push(subjectId);
+      }
+      if (term) {
+        query += ` AND term = $${i++}`;
+        params.push(term);
+      }
+      if (year) {
+        query += ` AND year = $${i++}`;
+        params.push(year);
+      }
+
+      return database.select<AssessmentMark[]>(query, params);
+    },
+    recordAssessmentMark: async (mark: Omit<AssessmentMark, "id" | "created_at" | "updated_at">): Promise<void> => {
+      const database = await getDb();
+      const id = generateId();
+      const now = new Date().toISOString();
+      await database.execute(
+        `INSERT INTO assessment_marks (id, student_id, subject_id, class_name, term, year, assessment_name, score, recorded_by, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT(student_id, subject_id, term, year, assessment_name)
+         DO UPDATE SET score = $8, recorded_by = $9, updated_at = $11`,
+        [id, mark.student_id, mark.subject_id, mark.class_name, mark.term, mark.year, mark.assessment_name, mark.score, mark.recorded_by, now, now]
       );
     }
   },

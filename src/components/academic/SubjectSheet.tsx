@@ -29,20 +29,23 @@ export function SubjectSheet({
 }: SubjectSheetProps) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [category, setCategory] = useState("General");
 
   useEffect(() => {
     if (subject) {
       setName(subject.name);
       setCode(subject.code || "");
+      setCategory(subject.category || "General");
     } else {
       setName("");
       setCode("");
+      setCategory("General");
     }
   }, [subject, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ name, code: code || undefined });
+    onSave({ name, code: code || undefined, category });
   };
 
   const isEditing = !!subject;
@@ -84,8 +87,19 @@ export function SubjectSheet({
                 placeholder="e.g. MATH"
                 className="h-10"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="category">Subject Category / Program</Label>
+              <Input
+                id="category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="e.g. General, ICT, Nursing"
+                className="h-10"
+              />
               <p className="text-[10px] text-muted-foreground">
-                Short code used for report cards.
+                Group subjects by department or course.
               </p>
             </div>
           </div>

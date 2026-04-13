@@ -36,7 +36,8 @@ import { StudentSheet } from "@/components/students/StudentSheet";
 import { PaymentSheet } from "@/components/finance/PaymentSheet";
 import { useStudents } from "@/lib/hooks/useStudents";
 import { useToast } from "@/lib/hooks/useToast";
-import type { Student, Attendance } from "@/lib/db";
+import { cn } from "@/lib/utils";
+import type { Student, Attendance, AssessmentMark } from "@/lib/db";
 import type { Payment } from "@/lib/db";
 
 type Tab = "profile" | "academic" | "finance" | "attendance";
@@ -128,7 +129,14 @@ export default function StudentDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           {activeTab === "profile" && <ProfileTab student={student} />}
-          {activeTab === "academic" && <AcademicTab marks={marks} isLoading={isMarksLoading} />}
+          {activeTab === "academic" && (
+            <AcademicTab 
+              studentId={student.id} 
+              studentClass={student.current_class} 
+              marks={marks} 
+              isLoading={isMarksLoading} 
+            />
+          )}
           {activeTab === "finance" && <FinanceTab payments={payments} isLoading={isFinanceLoading} />}
           {activeTab === "attendance" && <AttendanceHistoryTab studentId={studentId!} studentClass={student.current_class} />}
         </div>
@@ -334,113 +342,110 @@ function ProfileTab({ student }: { student: Student }) {
   );
 }
 
-function AcademicTab({ marks, isLoading }: { marks: any[], isLoading: boolean }) {
+function AcademicTab({ studentId, studentClass, marks, isLoading }: { studentId: string, studentClass: string, marks: any[], isLoading: boolean }) {
+  const [subTab, setSubTab] = useState<"marks" | "subjects">("marks");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2 p-1 bg-muted rounded-lg w-fit">
+        <button
+          onClick={() => setSubTab("marks")}
+          className={cn(
+            "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+            subTab === "marks" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          Marks History
+        </button>
+        <button
+          onClick={() => setSubTab("subjects")}
+          className={cn(
+            "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+            subTab === "subjects" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          Enrolled Subjects
+        </button>
+      </div>
+
+      {subTab === "marks" ? (
+        <MarksSubTab marks={marks} isLoading={isLoading} />
+      ) : (
+        <SubjectsSubTab studentId={studentId} studentClass={studentClass} />
+      )}
+    </div>
+  );
+}
+
+function MarksSubTab({ studentId }: { studentId: string }) {
+  const [marks, setMarks] = useState<AssessmentMark[]>([]);
   const [selectedTerm, setSelectedTerm] = useState<{ term: number; year: number } | null>(null);
   const [showReportCard, setShowReportCard] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    loadMarks();
+  }, [studentId]);
+
+  async function loadMarks() {
+    setIsLoading(true);
+    try {
+      const data = await queries.academic.getAssessmentMarks(studentId);
+      setMarks(data);
+      if (data.length > 0) {
+        setSelectedTerm({ term: data[0].term, year: data[0].year });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   const terms = useMemo(() => {
     const unique = new Map<string, { term: number; year: number }>();
     marks.forEach(m => {
       unique.set(`${m.term}-${m.year}`, { term: m.term, year: m.year });
     });
-    return Array.from(unique.values()).sort((a, b) => {
-      if (a.year !== b.year) return b.year - a.year;
-      return b.term - a.term;
-    });
+    return Array.from(unique.values()).sort((a, b) => b.year - a.year || b.term - a.term);
   }, [marks]);
 
-  const filteredMarks = selectedTerm
-    ? marks.filter(m => m.term === selectedTerm.term && m.year === selectedTerm.year)
-    : marks;
+  const filteredMarks = useMemo(() => {
+    if (!selectedTerm) return [];
+    return marks.filter(m => m.term === selectedTerm.term && m.year === selectedTerm.year);
+  }, [marks, selectedTerm]);
 
-  const avgTotal = filteredMarks.length > 0
-    ? filteredMarks.reduce((sum, m) => sum + m.total_mark, 0) / filteredMarks.length
-    : 0;
+  // Group marks by subject for the report card
+  const subjectGrouped = useMemo(() => {
+    const groups: Record<string, Record<string, number>> = {};
+    filteredMarks.forEach(m => {
+      if (!groups[m.subject_id]) groups[m.subject_id] = {};
+      groups[m.subject_id][m.assessment_name] = m.score;
+    });
+    return groups;
+  }, [filteredMarks]);
 
-  function getGrade(total: number): { grade: string; points: number; remarks: string } {
-    if (total >= 90) return { grade: "A", points: 1, remarks: "Excellent" };
-    if (total >= 80) return { grade: "B", points: 2, remarks: "Very Good" };
-    if (total >= 70) return { grade: "C", points: 3, remarks: "Good" };
-    if (total >= 60) return { grade: "D", points: 4, remarks: "Satisfactory" };
-    if (total >= 50) return { grade: "E", points: 5, remarks: "Pass" };
-    return { grade: "F", points: 6, remarks: "Fail" };
-  }
+  const assessmentNames = useMemo(() => {
+    const names = new Set<string>();
+    filteredMarks.forEach(m => names.add(m.assessment_name));
+    return Array.from(names);
+  }, [filteredMarks]);
 
-  function printReportCard() {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-    
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Report Card - Term ${selectedTerm?.term} ${selectedTerm?.year}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: auto; }
-            .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 15px; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-            th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
-            th { background: #f5f5f5; }
-            .total-row { font-weight: bold; background: #f5f5f5; }
-            .footer { margin-top: 30px; text-align: center; font-size: 0.9em; color: #666; }
-            @media print { body { padding: 0; } }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>Academic Report Card</h1>
-            <p>Term ${selectedTerm?.term}, ${selectedTerm?.year}</p>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Subject</th>
-                <th>Opening (30)</th>
-                <th>Mid-Term (30)</th>
-                <th>End-Term (40)</th>
-                <th>Total (100)</th>
-                <th>Grade</th>
-                <th>Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredMarks.map(m => {
-                const { grade, remarks } = getGrade(m.total_mark);
-                return `
-                  <tr>
-                    <td style="text-align: left">${m.subject_id}</td>
-                    <td>${m.opening_mark}</td>
-                    <td>${m.mid_term_mark}</td>
-                    <td>${m.end_term_mark}</td>
-                    <td>${m.total_mark}</td>
-                    <td>${grade}</td>
-                    <td>${remarks}</td>
-                  </tr>
-                `;
-              }).join("")}
-              <tr class="total-row">
-                <td colspan="4">Class Average</td>
-                <td>${avgTotal.toFixed(1)}</td>
-                <td>${getGrade(avgTotal).grade}</td>
-                <td>${getGrade(avgTotal).remarks}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="footer">
-            <p>Generated on ${new Date().toLocaleDateString()}</p>
-          </div>
-          <script>window.print(); window.close();</script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+  function getGrade(total: number) {
+    if (total >= 90) return { grade: "A", remarks: "Excellent" };
+    if (total >= 80) return { grade: "B", remarks: "Very Good" };
+    if (total >= 70) return { grade: "C", remarks: "Good" };
+    if (total >= 60) return { grade: "D", remarks: "Satisfactory" };
+    if (total >= 50) return { grade: "E", remarks: "Pass" };
+    return { grade: "F", remarks: "Fail" };
   }
 
   return (
     <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-lg">Marks History</CardTitle>
+          <CardTitle className="text-lg">Academic Progress</CardTitle>
           {terms.length > 0 && (
             <div className="flex gap-2">
               <Select
@@ -461,12 +466,7 @@ function AcademicTab({ marks, isLoading }: { marks: any[], isLoading: boolean })
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowReportCard(true)}
-                disabled={!selectedTerm || filteredMarks.length === 0}
-              >
+              <Button size="sm" variant="outline" onClick={() => setShowReportCard(true)}>
                 <Printer className="size-4 mr-1" />
                 Report Card
               </Button>
@@ -475,37 +475,38 @@ function AcademicTab({ marks, isLoading }: { marks: any[], isLoading: boolean })
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-center py-8 text-sm text-muted-foreground">Loading marks...</p>
-          ) : marks.length === 0 ? (
-            <p className="text-center py-8 text-sm text-muted-foreground">No marks recorded yet.</p>
+            <p className="text-center py-8 text-muted-foreground text-sm">Loading academic records...</p>
+          ) : filteredMarks.length === 0 ? (
+            <p className="text-center py-8 text-muted-foreground text-sm">No marks found for the selected period.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b text-muted-foreground">
-                    <th className="text-left py-2">Subject</th>
-                    <th className="text-left py-2">Term</th>
-                    <th className="text-right py-2">Opening</th>
-                    <th className="text-right py-2">Mid</th>
-                    <th className="text-right py-2">End</th>
-                    <th className="text-right py-2 font-bold">Total</th>
+                  <tr className="border-b text-muted-foreground bg-muted/30">
+                    <th className="text-left py-2 px-2">Subject</th>
+                    {assessmentNames.map(name => (
+                      <th key={name} className="text-center py-2 px-2">{name}</th>
+                    ))}
+                    <th className="text-right py-2 px-2 font-bold">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filteredMarks.map(m => {
-                    const { grade } = getGrade(m.total_mark);
+                  {Object.entries(subjectGrouped).map(([subjectId, scores]) => {
+                    const total = Object.values(scores).reduce((a, b) => a + b, 0);
                     return (
-                      <tr key={m.id}>
-                        <td className="py-2">{m.subject_id}</td>
-                        <td className="py-2">T{m.term} {m.year}</td>
-                        <td className="py-2 text-right">{m.opening_mark}</td>
-                        <td className="py-2 text-right">{m.mid_term_mark}</td>
-                        <td className="py-2 text-right">{m.end_term_mark}</td>
-                        <td className="py-2 text-right">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium mr-2 ${getGrade(m.total_mark).grade === "A" || getGrade(m.total_mark).grade === "B" ? "bg-green-100 text-green-700" : getGrade(m.total_mark).grade === "F" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"}`}>
-                            {grade}
+                      <tr key={subjectId}>
+                        <td className="py-2 px-2 font-medium">{subjectId}</td>
+                        {assessmentNames.map(name => (
+                          <td key={name} className="text-center py-2 px-2">{scores[name] || "-"}</td>
+                        ))}
+                        <td className="text-right py-2 px-2">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded text-[10px] font-bold mr-2",
+                            getGrade(total).grade === "F" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
+                          )}>
+                            {getGrade(total).grade}
                           </span>
-                          {m.total_mark}
+                          {total}
                         </td>
                       </tr>
                     );
@@ -518,81 +519,211 @@ function AcademicTab({ marks, isLoading }: { marks: any[], isLoading: boolean })
       </Card>
 
       <Dialog open={showReportCard} onOpenChange={setShowReportCard}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Report Card - Term {selectedTerm?.term} {selectedTerm?.year}</DialogTitle>
+            <DialogTitle>Academic Report Card</DialogTitle>
           </DialogHeader>
-          <div ref={reportRef} id="report-card" className="border rounded-lg p-6 space-y-4">
+          <div ref={reportRef} className="p-8 border rounded-lg space-y-6">
             <div className="text-center border-b pb-4">
-              <h2 className="font-bold text-xl">Academic Report Card</h2>
-              <p className="text-sm text-muted-foreground">
-                Term {selectedTerm?.term}, {selectedTerm?.year}
-              </p>
+              <h2 className="text-2xl font-bold uppercase tracking-tight">Student Progress Report</h2>
+              <p className="text-muted-foreground">Term {selectedTerm?.term}, Academic Year {selectedTerm?.year}</p>
             </div>
-            <table className="w-full text-sm">
+            
+            <div className="grid grid-cols-2 gap-4 text-sm mb-6">
+              <div>
+                <p><span className="text-muted-foreground uppercase text-[10px] font-bold">Student Name:</span></p>
+                <p className="font-bold">Managed at Page Level</p>
+              </div>
+              <div className="text-right">
+                <p><span className="text-muted-foreground uppercase text-[10px] font-bold">Generated:</span></p>
+                <p className="font-mono">{new Date().toLocaleDateString()}</p>
+              </div>
+            </div>
+
+            <table className="w-full text-sm border">
               <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="py-2 px-2 text-left">Subject</th>
-                  <th className="py-2 px-2">Op (30)</th>
-                  <th className="py-2 px-2">Mid (30)</th>
-                  <th className="py-2 px-2">End (40)</th>
-                  <th className="py-2 px-2">Total</th>
-                  <th className="py-2 px-2">Grade</th>
+                <tr className="bg-muted/50 border-b">
+                  <th className="py-3 px-4 text-left border-r">Subject</th>
+                  {assessmentNames.map(name => (
+                    <th key={name} className="py-3 px-2 text-center border-r">{name}</th>
+                  ))}
+                  <th className="py-3 px-2 text-center border-r">Total</th>
+                  <th className="py-3 px-2 text-center">Grade</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredMarks.map(m => {
-                  const { grade } = getGrade(m.total_mark);
+                {Object.entries(subjectGrouped).map(([subjectId, scores]) => {
+                  const total = Object.values(scores).reduce((a, b) => a + b, 0);
                   return (
-                    <tr key={m.id}>
-                      <td className="py-2 px-2">{m.subject_id}</td>
-                      <td className="py-2 px-2 text-center">{m.opening_mark}</td>
-                      <td className="py-2 px-2 text-center">{m.mid_term_mark}</td>
-                      <td className="py-2 px-2 text-center">{m.end_term_mark}</td>
-                      <td className="py-2 px-2 text-center font-medium">{m.total_mark}</td>
-                      <td className="py-2 px-2 text-center">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          grade === "A" || grade === "B" ? "bg-green-100 text-green-700" :
-                          grade === "F" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"
-                        }`}>
-                          {grade}
-                        </span>
-                      </td>
+                    <tr key={subjectId}>
+                      <td className="py-3 px-4 font-medium border-r">{subjectId}</td>
+                      {assessmentNames.map(name => (
+                        <td key={name} className="py-3 px-2 text-center border-r">{scores[name] || "0"}</td>
+                      ))}
+                      <td className="py-3 px-2 text-center border-r font-bold">{total}</td>
+                      <td className="py-3 px-2 text-center font-bold text-primary">{getGrade(total).grade}</td>
                     </tr>
                   );
                 })}
               </tbody>
-              <tfoot className="bg-muted/50">
-                <tr>
-                  <td colSpan={4} className="py-2 px-2 font-semibold">Class Average</td>
-                  <td className="py-2 px-2 text-center font-bold">{avgTotal.toFixed(1)}</td>
-                  <td className="py-2 px-2 text-center">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                      getGrade(avgTotal).grade === "A" || getGrade(avgTotal).grade === "B" ? "bg-green-100 text-green-700" :
-                      getGrade(avgTotal).grade === "F" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700"
-                    }`}>
-                      {getGrade(avgTotal).grade}
-                    </span>
-                  </td>
-                </tr>
-              </tfoot>
             </table>
-            <div className="border-t pt-4 text-center text-sm text-muted-foreground">
-              Generated on {new Date().toLocaleDateString()}
-            </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowReportCard(false)}>
-              Close
-            </Button>
-            <Button onClick={printReportCard}>
-              <Printer className="size-4 mr-2" />
-              Print Report Card
-            </Button>
-          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReportCard(false)}>Close</Button>
+            <Button onClick={() => window.print()}>Print Now</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+function SubjectsSubTab({ studentId, studentClass }: { studentId: string, studentClass: string }) {
+  const toast = useToast();
+  const [enrolled, setEnrolled] = useState<{ id: string; name: string; code?: string }[]>([]);
+  const [allSubjects, setAllSubjects] = useState<{ id: string; name: string; code?: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    loadData();
+  }, [studentId]);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [enrolledData, all] = await Promise.all([
+        queries.studentSubjects.findByStudent(studentId),
+        queries.subjects.findAll()
+      ]);
+      setEnrolled(enrolledData);
+      setAllSubjects(all);
+    } catch (error) {
+      console.error("Failed to load subject data:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAssign(subjectId: string) {
+    setIsProcessing(true);
+    try {
+      await queries.studentSubjects.assign(studentId, subjectId);
+      toast.success("Subject assigned");
+      loadData();
+    } catch (error) {
+      toast.error("Failed to assign subject");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleUnassign(subjectId: string) {
+    setIsProcessing(true);
+    try {
+      await queries.studentSubjects.unassign(studentId, subjectId);
+      toast.success("Subject removed");
+      loadData();
+    } catch (error) {
+      toast.error("Failed to remove subject");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleResetToDefaults() {
+    setIsProcessing(true);
+    try {
+      await queries.students.assignDefaultSubjectsByClass(studentId, studentClass);
+      toast.success("Reset to class defaults complete");
+      loadData();
+    } catch (error) {
+      toast.error("Failed to reset subjects");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  const available = allSubjects.filter(s => !enrolled.find(e => e.id === s.id));
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Current Curriculum</CardTitle>
+            <p className="text-[10px] text-muted-foreground uppercase font-bold">{enrolled.length} Subjects Enrolled</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleResetToDefaults} disabled={isProcessing}>
+            <RotateCcw className="size-3 mr-1.5" />
+            Reset Defaults
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-center py-8 text-muted-foreground">Loading...</p>
+          ) : enrolled.length === 0 ? (
+            <div className="text-center py-8 bg-muted/20 rounded-lg border border-dashed">
+              <p className="text-sm text-muted-foreground">No subjects enrolled yet.</p>
+              <p className="text-[10px] mt-1">Click "Reset Defaults" or add manually.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {enrolled.map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2 rounded-md border bg-card hover:bg-muted/30 transition-colors group">
+                  <div>
+                    <p className="text-sm font-medium">{s.name}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground uppercase">{s.code || "No Code"}</p>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="icon-sm" 
+                    className="opacity-0 group-hover:opacity-100 text-destructive hover:bg-destructive/10"
+                    onClick={() => handleUnassign(s.id)}
+                    disabled={isProcessing}
+                  >
+                    <UserMinus className="size-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Available Subjects</CardTitle>
+          <p className="text-[10px] text-muted-foreground uppercase font-bold">Add to student curriculum</p>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+            {available.length === 0 ? (
+              <p className="text-center py-8 text-xs text-muted-foreground">No more subjects available.</p>
+            ) : (
+              available.map(s => (
+                <div key={s.id} className="flex items-center justify-between p-2 rounded-md border bg-muted/10">
+                  <div>
+                    <p className="text-sm font-medium">{s.name}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground uppercase">{s.code}</p>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-primary hover:bg-primary/10 h-8"
+                    onClick={() => handleAssign(s.id)}
+                    disabled={isProcessing}
+                  >
+                    <Plus className="size-3 mr-1" />
+                    Add
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
